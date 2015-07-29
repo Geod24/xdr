@@ -1,0 +1,8 @@
+{
+	"name": "xdr",
+	"description": "Encoding and decoding XDR (RFC 4506)",
+	"copyright": "Copyright © 2015, Paul O'Neil",
+	"authors": ["Paul O'Neil"],
+    "license": "AGPL-3.0",
+    "targetType": "library"
+}

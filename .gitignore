@@ -5,3 +5,4 @@ __dummy.html
 *.obj
 libxdr.a
 dub.selections.json
+__test__*

@@ -29,6 +29,11 @@ class Serializer(Output) if (isOutputRange!(Output, ubyte))
     Output output;
 
     public:
+    this(Output o)
+    {
+        output = o;
+    }
+
     void put(T)(T val) if (T.sizeof % 4 == 0)
     {
         std.range.put(output, nativeToBigEndian(val)[]);
@@ -85,4 +90,21 @@ class Serializer(Output) if (isOutputRange!(Output, ubyte))
             this.put(data);
         }
     }
+}
+
+unittest
+{
+    ubyte[] outBuffer = new ubyte[4];
+    auto serializer = new Serializer!(ubyte[])(outBuffer);
+
+    assert(__traits(compiles, serializer.put!short(2)) == false);
+}
+
+unittest
+{
+    ubyte[] outBuffer = new ubyte[4];
+    auto serializer = new Serializer!(ubyte[])(outBuffer);
+
+    serializer.put!int(4);
+    assert(outBuffer == [0, 0, 0, 4]);
 }

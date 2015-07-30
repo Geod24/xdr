@@ -34,7 +34,8 @@ class Serializer(Output) if (isOutputRange!(Output, ubyte))
         output = o;
     }
 
-    void put(T)(T val) if (T.sizeof % 4 == 0 && isIntegral!T)
+    void put(T)(T val)
+        if (T.sizeof % 4 == 0 && (isIntegral!T || isFloatingPoint!T))
     {
         std.range.put(output, nativeToBigEndian(val)[]);
     }
@@ -111,6 +112,9 @@ unittest
     assert(__traits(compiles, serializer.put!ulong(2)) == true);
 
     assert(__traits(compiles, serializer.put!bool(true)) == true);
+
+    assert(__traits(compiles, serializer.put!float(1.0)) == true);
+    assert(__traits(compiles, serializer.put!double(1.0)) == true);
 }
 
 unittest

@@ -3,3 +3,5 @@ d:
     - dmd
     - ldc
     - gdc
+notifications:
+    email: false

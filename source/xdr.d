@@ -64,17 +64,6 @@ class Serializer(Output) if (isOutputRange!(Output, ubyte))
         std.range.put(output, [0, 0, 0][0 .. padding]);
     }
 
-    void put(T: ubyte[])(in ubyte[] data)
-    in {
-        assert(data.length <= uint.max);
-    }
-    body {
-        this.put!uint(data.length);
-        std.rage.put(output, data);
-        enum padding = 4 - (data.length % 4);
-        std.range.put(output, [0, 0, 0][0 .. padding]);
-    }
-
     void put(Array)(in Array data) if (isStaticArray!Array)
     {
         foreach (const ref elem; data)
@@ -83,14 +72,54 @@ class Serializer(Output) if (isOutputRange!(Output, ubyte))
         }
     }
 
-    void put(Array)(in Array data) if (isDynamicArray!Array)
-    {
-        this.put!uint(data.length);
+    void put(Array)(in Array data)
+        if (isDynamicArray!Array && !is(Array == ubyte[]) && !is(Array == string))
+    in {
+        assert(data.length <= uint.max);
+    }
+    body {
+        this.put!uint(cast(uint)data.length);
         foreach (const ref elem; data)
         {
-            this.put(data);
+            this.put(elem);
         }
     }
+
+    void put(T: ubyte[])(in T data)
+    in {
+        assert(data.length <= uint.max);
+    }
+    body {
+        this.put!uint(cast(uint)data.length);
+        std.range.put(output, data);
+        if (data.length % 4 > 0)
+        {
+            immutable pad_length = 4 - (data.length % 4);
+            ubyte[] padding = [0, 0, 0];
+            std.range.put(output, padding[0 .. pad_length]);
+        }
+    }
+
+    // FIXME combine with ubyte[]
+    void put(T: string)(in T data)
+    in {
+        assert(data.length <= uint.max);
+    }
+    body {
+        this.put!uint(cast(uint)data.length);
+        std.range.put(output, data);
+        if (data.length % 4 > 0)
+        {
+            immutable pad_length = 4 - (data.length % 4);
+            ubyte[] padding = [0, 0, 0];
+            std.range.put(output, padding[0 .. pad_length]);
+        }
+    }
+}
+
+Serializer!O makeSerializer(O)(O o)
+{
+    return new Serializer!O(o);
 }
 
 unittest
@@ -120,8 +149,55 @@ unittest
 unittest
 {
     ubyte[] outBuffer = new ubyte[4];
-    auto serializer = new Serializer!(ubyte[])(outBuffer);
+    auto serializer = makeSerializer(outBuffer);
 
     serializer.put!int(4);
     assert(outBuffer == [0, 0, 0, 4]);
+}
+
+unittest
+{
+    ubyte[] outBuffer = new ubyte[4];
+    auto serializer = makeSerializer(outBuffer);
+
+    serializer.put!bool(true);
+    assert(outBuffer == [0, 0, 0, 1]);
+}
+
+unittest
+{
+    ubyte[] outBuffer = new ubyte[8];
+    auto serializer = makeSerializer(outBuffer);
+
+    serializer.put!long(4);
+    assert(outBuffer == [0, 0, 0, 0, 0, 0, 0, 4]);
+}
+
+unittest
+{
+    ubyte[] outBuffer = new ubyte[8];
+    auto serializer = makeSerializer(outBuffer);
+
+    ubyte[] data = [1, 2, 3, 4];
+    serializer.put(data);
+    assert(outBuffer == [0, 0, 0, 4, 1, 2, 3, 4]);
+}
+unittest
+{
+    ubyte[] outBuffer = new ubyte[8];
+    auto serializer = makeSerializer(outBuffer);
+
+    ubyte[] data = [1, 2, 3];
+    serializer.put(data);
+    assert(outBuffer == [0, 0, 0, 3, 1, 2, 3, 0]);
+}
+
+unittest
+{
+    ubyte[] outBuffer = new ubyte[12];
+    auto serializer = makeSerializer(outBuffer);
+
+    string data = "hello";
+    serializer.put(data);
+    assert(outBuffer == [0, 0, 0, 5, 'h', 'e', 'l', 'l', 'o', 0, 0, 0]);
 }

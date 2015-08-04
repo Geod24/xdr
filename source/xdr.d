@@ -51,6 +51,11 @@ class Serializer(Output) if (isOutputRange!(Output, ubyte))
             this.put!int(0);
         }
     }
+    // The existence of this method seems to solve const/overload problems
+    void put(bool val)
+    {
+        put!bool(val);
+    }
 
     void put(ulong len)(in ubyte[len] data) if (len % 4 == 0)
     {
@@ -144,6 +149,37 @@ unittest
 
     assert(__traits(compiles, serializer.put!float(1.0)) == true);
     assert(__traits(compiles, serializer.put!double(1.0)) == true);
+
+    assert(__traits(compiles, serializer.put!(ubyte[])([])) == true);
+    assert(__traits(compiles, serializer.put!(string)("")) == true);
+
+    assert(__traits(compiles, serializer.put!(short[])([])) == false);
+    assert(__traits(compiles, serializer.put!(ushort[])([])) == false);
+
+    assert(__traits(compiles, serializer.put!(short[2])([1, 2])) == false);
+
+    assert(__traits(compiles, serializer.put!(int[2])([1, 2])) == true);
+    assert(__traits(compiles, serializer.put!(uint[2])([1, 2])) == true);
+    assert(__traits(compiles, serializer.put!(long[2])([1, 2])) == true);
+    assert(__traits(compiles, serializer.put!(ulong[2])([1, 2])) == true);
+    // Commented out pending std.bitmanip.EndianSwap stuff
+    // From std.bitmanip.d:2210
+    // private union EndianSwapper(T)
+    //     if(canSwapEndianness!T)
+    // {
+    //     Unqual!T value;
+    //     ubyte[T.sizeof] array;
+    //
+    //     static if(is(FloatingPointTypeOf!T == float))
+    //         uint  intValue;
+    //     else static if(is(FloatingPointTypeOf!T == double))
+    //         ulong intValue;
+    //
+    // }
+    // The static ifs fail because FloatingPointTypeOf!(const(float)) == const(float), not float
+    // assert(__traits(compiles, serializer.put!(float[2])([1, 2])) == true);
+    // assert(__traits(compiles, serializer.put!(double[2])([1, 2])) == true);
+    assert(__traits(compiles, serializer.put!(bool[2])([true, false])) == true);
 }
 
 unittest

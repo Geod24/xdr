@@ -68,7 +68,7 @@ class Serializer(Output) if (isOutputRange!(Output, ubyte))
     {
         foreach (const ref elem; data)
         {
-            this.put(data);
+            this.put(elem);
         }
     }
 
@@ -200,4 +200,14 @@ unittest
     string data = "hello";
     serializer.put(data);
     assert(outBuffer == [0, 0, 0, 5, 'h', 'e', 'l', 'l', 'o', 0, 0, 0]);
+}
+
+unittest
+{
+    ubyte[] outBuffer = new ubyte[8];
+    auto serializer = makeSerializer(outBuffer);
+
+    int[2] data = [1, 2];
+    serializer.put(data);
+    assert(outBuffer == [0, 0, 0, 1, 0, 0, 0, 2]);
 }

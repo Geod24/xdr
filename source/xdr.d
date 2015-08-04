@@ -120,6 +120,15 @@ class Serializer(Output) if (isOutputRange!(Output, ubyte))
             std.range.put(output, padding[0 .. pad_length]);
         }
     }
+
+    void put(T)(in T data)
+        if (isAggregateType!T && !hasIndirections!T)
+    {
+        foreach (elem; data.tupleof)
+        {
+            put(elem);
+        }
+    }
 }
 
 Serializer!O makeSerializer(O)(O o)
@@ -245,5 +254,21 @@ unittest
 
     int[2] data = [1, 2];
     serializer.put(data);
+    assert(outBuffer == [0, 0, 0, 1, 0, 0, 0, 2]);
+}
+
+unittest
+{
+    ubyte[] outBuffer = new ubyte[8];
+    auto serializer = makeSerializer(outBuffer);
+
+    struct AB
+    {
+        int a;
+        int b;
+    }
+
+    AB ab = {1, 2};
+    serializer.put(ab);
     assert(outBuffer == [0, 0, 0, 1, 0, 0, 0, 2]);
 }

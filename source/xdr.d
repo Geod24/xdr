@@ -23,6 +23,11 @@ import std.bitmanip;
 import std.range;
 import std.traits;
 
+version (unittest)
+{
+    import std.exception : assertThrown;
+}
+
 class Serializer(Output) if (isOutputRange!(Output, ubyte))
 {
     private:
@@ -272,3 +277,244 @@ unittest
     serializer.put(ab);
     assert(outBuffer == [0, 0, 0, 1, 0, 0, 0, 2]);
 }
+
+class EndOfInput : Exception
+{
+    this(string file = __FILE__, size_t line = __LINE__)
+    {
+        super("Reached end of input while extracting data.", file, line);
+    }
+}
+
+class NotABool : Exception
+{
+    this(int intVal, string file = __FILE__, size_t line = __LINE__)
+    {
+        import std.conv : to;
+        super("Tried to decode into a bool, but " ~ std.conv.to!string(intVal) ~ " is not a valid XDR bool.", file, line);
+    }
+}
+
+// Uses popFrontN, so it may read the end of input without
+// doing anything useful with it
+class Deserializer(Input) if (isInputRange!Input && is(ElementType!Input == ubyte))
+{
+    import std.algorithm : copy;
+
+    private:
+    Input input;
+
+    public:
+    this(Input i)
+    {
+        input = i;
+    }
+
+    T get(T)()
+        if (T.sizeof % 4 == 0 && (isIntegral!T || isFloatingPoint!T))
+    {
+        //size_t bytesRead = input.popFrontN(T.sizeof);
+        ubyte[T.sizeof] buffer;
+        ubyte[] remaining = copy(input.take(T.sizeof), buffer[]);
+        if (remaining.length != 0)
+        {
+            throw new EndOfInput();
+        }
+        // Only need to pop front here if the input.take() does not.
+        // For ubyte[], take does not popFront, but maybe for InputRanges
+        // that are not sliceable it does?
+        input.popFrontExactly(T.sizeof);
+        return bigEndianToNative!T(buffer);
+    }
+
+    bool get(T: bool)()
+    {
+        immutable intVal = get!int();
+        if (intVal == 0)
+        {
+            return false;
+        }
+        else if (intVal == 1)
+        {
+            return true;
+        }
+        else
+        {
+            throw new NotABool(intVal);
+        }
+    }
+
+    /*
+    void put(ulong len)(in ubyte[len] data) if (len % 4 == 0)
+    {
+        std.range.put(output, data[]);
+    }*/
+
+    //void get(T)() if (isStaticArray!T && is(ElementType!T == ubyte) && len % 4 != 0)
+    auto get(T)() if (is(T == ubyte[length], length : ulong) && length % 4 != 0)
+    {
+        enum pad_length = 4 - (len % 4);
+        auto result = input.take(length);
+        input.popFrontExactly(length + pad_length);
+        return result;
+    }
+
+    /*void get(Array)() if (is(Array == Element[length], length : ulong))
+    {
+        //enum elementSize
+        //input.chunks(Element.sizeof).map!
+    }*/
+
+    /*void put(Array)(in Array data)
+        if (isDynamicArray!Array && !is(Array == ubyte[]) && !is(Array == string))
+    in {
+        assert(data.length <= uint.max);
+    }
+    body {
+        this.put!uint(cast(uint)data.length);
+        foreach (const ref elem; data)
+        {
+            this.put(elem);
+        }
+    }*/
+
+    auto get(T: ubyte[])()
+    {
+        uint length = get!uint();
+        auto result = input.take(length);
+
+        input.popFrontExactly(length);
+        if (length % 4 > 0)
+        {
+            input.popFrontExactly(4 - (length % 4));
+        }
+        return result;
+    }
+
+    // FIXME combine with ubyte[]
+    auto get(T: string)()
+    {
+        uint length = get!uint();
+        auto result = input.take(length);
+
+        input.popFrontExactly(length);
+        if (length % 4 > 0)
+        {
+            input.popFrontExactly(4 - (length % 4));
+        }
+        return result;
+    }
+
+    /*void put(T)(in T data)
+        if (isAggregateType!T && !hasIndirections!T)
+    {
+        foreach (elem; data.tupleof)
+        {
+            put(elem);
+        }
+    }*/
+}
+
+Deserializer!I makeDeserializer(I)(I i)
+{
+    return new Deserializer!I(i);
+}
+
+unittest
+{
+    ubyte[] inBuffer = [0, 0, 0, 4];
+    auto deserializer = makeDeserializer(inBuffer);
+
+    assert(deserializer.get!int() == 4);
+}
+unittest
+{
+    ubyte[] inBuffer = [0, 0, 0, 4, 0, 0, 0, 12];
+    auto deserializer = makeDeserializer(inBuffer);
+
+    assert(deserializer.get!int() == 4);
+    assert(deserializer.get!int() == 12);
+
+    assertThrown!EndOfInput(deserializer.get!int());
+}
+
+unittest
+{
+    ubyte[] inBuffer = [0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 2];
+    auto deserializer = makeDeserializer(inBuffer);
+
+    assert(deserializer.get!bool() == true);
+    assert(deserializer.get!bool() == false);
+    assertThrown!NotABool(deserializer.get!bool());
+    assertThrown!EndOfInput(deserializer.get!bool());
+}
+
+unittest
+{
+    ubyte[] inBuffer = [0, 0, 0, 0, 0, 0, 0, 4];
+    auto deserializer = makeDeserializer(inBuffer);
+
+    assert(deserializer.get!long() == 4);
+    assertThrown!EndOfInput(deserializer.get!long());
+}
+
+unittest
+{
+    ubyte[] inBuffer = [0, 0, 0, 4, 1, 2, 3, 4];
+    auto deserializer = makeDeserializer(inBuffer);
+
+    assert(deserializer.get!(ubyte[])() == [1, 2, 3, 4]);
+    assertThrown!EndOfInput(deserializer.get!(ubyte[])());
+}
+
+unittest
+{
+    ubyte[] inBuffer = [0, 0, 0, 3, 1, 2, 3, 0];
+    auto deserializer = makeDeserializer(inBuffer);
+
+    assert(deserializer.get!(ubyte[])() == [1, 2, 3]);
+    assertThrown!EndOfInput(deserializer.get!int());
+}
+
+unittest
+{
+    ubyte[] inBuffer = [0, 0, 0, 5, 'h', 'e', 'l', 'l', 'o', 0, 0, 0];
+    auto deserializer = makeDeserializer(inBuffer);
+
+    assert(deserializer.get!string() == "hello");
+    assertThrown!EndOfInput(deserializer.get!int());
+}
+
+/*unittest
+{
+    ubyte[] inBuffer = [0, 0, 0, 1, 0, 0, 0, 2];
+    auto deserializer = makeDeserializer(inBuffer);
+
+    assert(deserializer.get!(int[2])() == [1, 2]);
+    assertThrown!EndOfInput(deserializer.get!int());
+}
+
+unittest
+{
+    ubyte[] inBuffer = [1, 2, 0, 0];
+    auto deserializer = makeDeserializer(inBuffer);
+
+    assert(deserializer.get!(ubyte[2])() == [1, 2]);
+    assertThrown!EndOfInput(deserializer.get!int());
+}
+
+unittest
+{
+    ubyte[] outBuffer = new ubyte[8];
+    auto serializer = makeSerializer(outBuffer);
+
+    struct AB
+    {
+        int a;
+        int b;
+    }
+
+    AB ab = {1, 2};
+    serializer.put(ab);
+    assert(outBuffer == [0, 0, 0, 1, 0, 0, 0, 2]);
+}*/

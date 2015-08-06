@@ -375,6 +375,9 @@ class Deserializer(Input) if (isInputRange!Input && is(ElementType!Input == ubyt
         }
 
         Array result;
+        // FIXME This is super sketchy
+        // I should probably get rid of this class and make these free
+        // functions with UFCS and use get!Element(chunk) in the map argument
         copy(input.take(elementSize * length).chunks(elementSize).map!((chunk)=> get!Element()), result[]);
         return result;
     }

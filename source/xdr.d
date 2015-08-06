@@ -359,11 +359,25 @@ class Deserializer(Input) if (isInputRange!Input && is(ElementType!Input == ubyt
         return result;
     }
 
-    /*void get(Array)() if (is(Array == Element[length], length : ulong))
+    Array get(Array)() if (is(Array == Element[length], Element, ulong length))
     {
-        //enum elementSize
-        //input.chunks(Element.sizeof).map!
-    }*/
+        import std.algorithm : copy, map;
+
+        alias Element = ElementType!Array;
+        enum length = Array.length;
+        static if (Element.sizeof % 4 == 0)
+        {
+            enum elementSize = Element.sizeof;
+        }
+        else
+        {
+            enum elementSize = Element.sizeof + 4 - (Element.sizeof % 4);
+        }
+
+        Array result;
+        copy(input.take(elementSize * length).chunks(elementSize).map!((chunk)=> get!Element()), result[]);
+        return result;
+    }
 
     /*void put(Array)(in Array data)
         if (isDynamicArray!Array && !is(Array == ubyte[]) && !is(Array == string))
@@ -485,7 +499,7 @@ unittest
     assertThrown!EndOfInput(deserializer.get!int());
 }
 
-/*unittest
+unittest
 {
     ubyte[] inBuffer = [0, 0, 0, 1, 0, 0, 0, 2];
     auto deserializer = makeDeserializer(inBuffer);
@@ -494,7 +508,7 @@ unittest
     assertThrown!EndOfInput(deserializer.get!int());
 }
 
-unittest
+/*unittest
 {
     ubyte[] inBuffer = [1, 2, 0, 0];
     auto deserializer = makeDeserializer(inBuffer);

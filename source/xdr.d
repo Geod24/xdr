@@ -351,15 +351,25 @@ class Deserializer(Input) if (isInputRange!Input && is(ElementType!Input == ubyt
     }*/
 
     //void get(T)() if (isStaticArray!T && is(ElementType!T == ubyte) && len % 4 != 0)
-    auto get(T)() if (is(T == ubyte[length], length : ulong) && length % 4 != 0)
+    auto get(T)()
+        if (is(T == ubyte[length], ulong length)
+                && isStaticArray!T)
     {
-        enum pad_length = 4 - (len % 4);
-        auto result = input.take(length);
-        input.popFrontExactly(length + pad_length);
+        static if (T.length % 4 == 0)
+        {
+            enum pad_length = 4 - (T.length % 4);
+        }
+        else
+        {
+            enum pad_length = 0;
+        }
+
+        auto result = input.take(T.length);
+        input.popFrontExactly(T.length + pad_length);
         return result;
     }
 
-    Array get(Array)() if (is(Array == Element[length], Element, ulong length))
+    Array get(Array)() if (is(Array == Element[length], Element, ulong length) && !is(ElementType!Array == ubyte))
     {
         import std.algorithm : copy, map;
 
@@ -396,6 +406,7 @@ class Deserializer(Input) if (isInputRange!Input && is(ElementType!Input == ubyt
     }*/
 
     auto get(T: ubyte[])()
+        if (isDynamicArray!T)
     {
         uint length = get!uint();
         auto result = input.take(length);
@@ -511,7 +522,7 @@ unittest
     assertThrown!EndOfInput(deserializer.get!int());
 }
 
-/*unittest
+unittest
 {
     ubyte[] inBuffer = [1, 2, 0, 0];
     auto deserializer = makeDeserializer(inBuffer);
@@ -520,7 +531,7 @@ unittest
     assertThrown!EndOfInput(deserializer.get!int());
 }
 
-unittest
+/*unittest
 {
     ubyte[] outBuffer = new ubyte[8];
     auto serializer = makeSerializer(outBuffer);

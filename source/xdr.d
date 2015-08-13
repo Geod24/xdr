@@ -433,14 +433,17 @@ class Deserializer(Input) if (isInputRange!Input && is(ElementType!Input == ubyt
         return result;
     }
 
-    /*void put(T)(in T data)
+    T get(T)()
         if (isAggregateType!T && !hasIndirections!T)
     {
-        foreach (elem; data.tupleof)
+        T result;
+        foreach (ref elem; result.tupleof)
         {
-            put(elem);
+            elem = get!(typeof(elem));
         }
-    }*/
+
+        return result;
+    }
 }
 
 Deserializer!I makeDeserializer(I)(I i)
@@ -531,10 +534,10 @@ unittest
     assertThrown!EndOfInput(deserializer.get!int());
 }
 
-/*unittest
+unittest
 {
-    ubyte[] outBuffer = new ubyte[8];
-    auto serializer = makeSerializer(outBuffer);
+    ubyte[] inBuffer = [0, 0, 0, 1, 0, 0, 0, 2];
+    auto deserializer = makeDeserializer(inBuffer);
 
     struct AB
     {
@@ -543,6 +546,6 @@ unittest
     }
 
     AB ab = {1, 2};
-    serializer.put(ab);
-    assert(outBuffer == [0, 0, 0, 1, 0, 0, 0, 2]);
-}*/
+    assert(deserializer.get!AB() == ab);
+    assertThrown!EndOfInput(deserializer.get!int());
+}

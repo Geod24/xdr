@@ -19,6 +19,7 @@
 //! Provides an implementation of RFC 4506.
 module xdr;
 
+import std.algorithm : copy, map;
 import std.bitmanip;
 import std.range;
 import std.traits;
@@ -297,247 +298,228 @@ class NotABool : Exception
 
 // Uses popFrontN, so it may read the end of input without
 // doing anything useful with it
-class Deserializer(Input) if (isInputRange!Input && is(ElementType!Input == ubyte))
+T get(T, Input)(ref Input input)
+    if ((isInputRange!Input && is(ElementType!Input == ubyte))
+        && (T.sizeof % 4 == 0 && (isIntegral!T || isFloatingPoint!T)))
 {
-    import std.algorithm : copy;
-
-    private:
-    Input input;
-
-    public:
-    this(Input i)
+    ubyte[T.sizeof] buffer;
+    ubyte[] remaining = copy(input.take(T.sizeof), buffer[]);
+    if (remaining.length != 0)
     {
-        input = i;
+        throw new EndOfInput();
     }
+    // Only need to pop front here if the input.take() does not.
+    // For ubyte[], take does not popFront, but maybe for InputRanges
+    // that are not sliceable it does?
+    input.popFrontExactly(T.sizeof);
+    return bigEndianToNative!T(buffer);
+}
 
-    T get(T)()
-        if (T.sizeof % 4 == 0 && (isIntegral!T || isFloatingPoint!T))
+bool get(T: bool, Input)(ref Input input)
+    if (isInputRange!Input && is(ElementType!Input == ubyte))
+{
+    immutable intVal = input.get!int();
+    if (intVal == 0)
     {
-        //size_t bytesRead = input.popFrontN(T.sizeof);
-        ubyte[T.sizeof] buffer;
-        ubyte[] remaining = copy(input.take(T.sizeof), buffer[]);
-        if (remaining.length != 0)
-        {
-            throw new EndOfInput();
-        }
-        // Only need to pop front here if the input.take() does not.
-        // For ubyte[], take does not popFront, but maybe for InputRanges
-        // that are not sliceable it does?
-        input.popFrontExactly(T.sizeof);
-        return bigEndianToNative!T(buffer);
+        return false;
     }
-
-    bool get(T: bool)()
+    else if (intVal == 1)
     {
-        immutable intVal = get!int();
-        if (intVal == 0)
-        {
-            return false;
-        }
-        else if (intVal == 1)
-        {
-            return true;
-        }
-        else
-        {
-            throw new NotABool(intVal);
-        }
+        return true;
     }
-
-    /*
-    void put(ulong len)(in ubyte[len] data) if (len % 4 == 0)
+    else
     {
-        std.range.put(output, data[]);
-    }*/
-
-    //void get(T)() if (isStaticArray!T && is(ElementType!T == ubyte) && len % 4 != 0)
-    auto get(T)()
-        if (is(T == ubyte[length], ulong length)
-                && isStaticArray!T)
-    {
-        static if (T.length % 4 == 0)
-        {
-            enum pad_length = 4 - (T.length % 4);
-        }
-        else
-        {
-            enum pad_length = 0;
-        }
-
-        auto result = input.take(T.length);
-        input.popFrontExactly(T.length + pad_length);
-        return result;
-    }
-
-    Array get(Array)() if (is(Array == Element[length], Element, ulong length) && !is(ElementType!Array == ubyte))
-    {
-        import std.algorithm : copy, map;
-
-        alias Element = ElementType!Array;
-        enum length = Array.length;
-        static if (Element.sizeof % 4 == 0)
-        {
-            enum elementSize = Element.sizeof;
-        }
-        else
-        {
-            enum elementSize = Element.sizeof + 4 - (Element.sizeof % 4);
-        }
-
-        Array result;
-        // FIXME This is super sketchy
-        // I should probably get rid of this class and make these free
-        // functions with UFCS and use get!Element(chunk) in the map argument
-        copy(input.take(elementSize * length).chunks(elementSize).map!((chunk)=> get!Element()), result[]);
-        return result;
-    }
-
-    /*void put(Array)(in Array data)
-        if (isDynamicArray!Array && !is(Array == ubyte[]) && !is(Array == string))
-    in {
-        assert(data.length <= uint.max);
-    }
-    body {
-        this.put!uint(cast(uint)data.length);
-        foreach (const ref elem; data)
-        {
-            this.put(elem);
-        }
-    }*/
-
-    auto get(T: ubyte[])()
-        if (isDynamicArray!T)
-    {
-        uint length = get!uint();
-        auto result = input.take(length);
-
-        input.popFrontExactly(length);
-        if (length % 4 > 0)
-        {
-            input.popFrontExactly(4 - (length % 4));
-        }
-        return result;
-    }
-
-    // FIXME combine with ubyte[]
-    auto get(T: string)()
-    {
-        uint length = get!uint();
-        auto result = input.take(length);
-
-        input.popFrontExactly(length);
-        if (length % 4 > 0)
-        {
-            input.popFrontExactly(4 - (length % 4));
-        }
-        return result;
-    }
-
-    T get(T)()
-        if (isAggregateType!T && !hasIndirections!T)
-    {
-        T result;
-        foreach (ref elem; result.tupleof)
-        {
-            elem = get!(typeof(elem));
-        }
-
-        return result;
+        throw new NotABool(intVal);
     }
 }
 
-Deserializer!I makeDeserializer(I)(I i)
+auto get(T, Input)(ref Input input)
+    if (isInputRange!Input && is(ElementType!Input == ubyte)
+        && is(T == ubyte[length], ulong length)
+           && isStaticArray!T)
 {
-    return new Deserializer!I(i);
+    static if (T.length % 4 != 0)
+    {
+        enum pad_length = 4 - (T.length % 4);
+    }
+    else
+    {
+        enum pad_length = 0;
+    }
+
+    auto result = input.take(T.length);
+    input.popFrontExactly(T.length + pad_length);
+    return result;
+}
+
+Array get(Array, Input)(ref Input input)
+    if (isInputRange!Input && is(ElementType!Input == ubyte)
+        && is(Array == Element[length], Element, ulong length)
+            && !is(ElementType!Array == ubyte)
+            && isStaticArray!Array)
+{
+    alias Element = ElementType!Array;
+    enum length = Array.length;
+    static if (Element.sizeof % 4 == 0)
+    {
+        enum elementSize = Element.sizeof;
+    }
+    else
+    {
+        enum elementSize = Element.sizeof + 4 - (Element.sizeof % 4);
+    }
+
+    Array result;
+    // FIXME check on whether I need to pop front afterwards
+    copy(input.take(elementSize * length).chunks(elementSize).map!((chunk)=> chunk.get!Element()), result[]);
+    input.popFrontExactly(elementSize * length);
+    return result;
+}
+
+auto get(Array, Input)(ref Input input)
+    if (isInputRange!Input && is(ElementType!Input == ubyte)
+        && isDynamicArray!Array && !is(Array == ubyte[]) && !is(Array == string))
+{
+    alias Element = ElementType!Array;
+
+    uint length = input.get!uint();
+    static if (Element.sizeof % 4 == 0)
+    {
+        enum elementSize = Element.sizeof;
+    }
+    else
+    {
+        enum elementSize = Element.sizeof + 4 - (Element.sizeof % 4);
+    }
+
+    Array result = new Element[length];
+    // FIXME check on whether I need to pop front afterwards
+    copy(input.take(elementSize * length).chunks(elementSize).map!((chunk)=> chunk.get!Element()), result[]);
+    input.popFrontExactly(elementSize * length);
+    return result;
+}
+
+auto get(Array, Input)(ref Input input)
+    if (isInputRange!Input && is(ElementType!Input == ubyte)
+        && isDynamicArray!Array && (is(Array == ubyte[]) || is(Array == string)))
+{
+    uint length = input.get!uint();
+    auto result = input.take(length);
+
+    input.popFrontExactly(length);
+    if (length % 4 > 0)
+    {
+        input.popFrontExactly(4 - (length % 4));
+    }
+    return result;
+}
+
+T get(T, Input)(ref Input input)
+    if (isInputRange!Input && is(ElementType!Input == ubyte)
+        && isAggregateType!T && !hasIndirections!T)
+{
+    T result;
+    foreach (ref elem; result.tupleof)
+    {
+        elem = input.get!(typeof(elem));
+    }
+
+    return result;
 }
 
 unittest
 {
     ubyte[] inBuffer = [0, 0, 0, 4];
-    auto deserializer = makeDeserializer(inBuffer);
 
-    assert(deserializer.get!int() == 4);
+    assert(inBuffer.get!int() == 4);
 }
 unittest
 {
     ubyte[] inBuffer = [0, 0, 0, 4, 0, 0, 0, 12];
-    auto deserializer = makeDeserializer(inBuffer);
 
-    assert(deserializer.get!int() == 4);
-    assert(deserializer.get!int() == 12);
+    assert(inBuffer.get!int() == 4);
+    assert(inBuffer.get!int() == 12);
 
-    assertThrown!EndOfInput(deserializer.get!int());
+    assertThrown!EndOfInput(inBuffer.get!int());
 }
 
 unittest
 {
     ubyte[] inBuffer = [0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 2];
-    auto deserializer = makeDeserializer(inBuffer);
 
-    assert(deserializer.get!bool() == true);
-    assert(deserializer.get!bool() == false);
-    assertThrown!NotABool(deserializer.get!bool());
-    assertThrown!EndOfInput(deserializer.get!bool());
+    assert(inBuffer.get!bool() == true);
+    assert(inBuffer.get!bool() == false);
+    assertThrown!NotABool(inBuffer.get!bool());
+    assertThrown!EndOfInput(inBuffer.get!bool());
 }
 
 unittest
 {
     ubyte[] inBuffer = [0, 0, 0, 0, 0, 0, 0, 4];
-    auto deserializer = makeDeserializer(inBuffer);
 
-    assert(deserializer.get!long() == 4);
-    assertThrown!EndOfInput(deserializer.get!long());
+    assert(inBuffer.get!long() == 4);
+    assertThrown!EndOfInput(inBuffer.get!long());
 }
 
 unittest
 {
     ubyte[] inBuffer = [0, 0, 0, 4, 1, 2, 3, 4];
-    auto deserializer = makeDeserializer(inBuffer);
 
-    assert(deserializer.get!(ubyte[])() == [1, 2, 3, 4]);
-    assertThrown!EndOfInput(deserializer.get!(ubyte[])());
+    assert(inBuffer.get!(ubyte[])() == [1, 2, 3, 4]);
+    assertThrown!EndOfInput(inBuffer.get!(ubyte[])());
 }
 
 unittest
 {
     ubyte[] inBuffer = [0, 0, 0, 3, 1, 2, 3, 0];
-    auto deserializer = makeDeserializer(inBuffer);
 
-    assert(deserializer.get!(ubyte[])() == [1, 2, 3]);
-    assertThrown!EndOfInput(deserializer.get!int());
+    assert(inBuffer.get!(ubyte[])() == [1, 2, 3]);
+    assertThrown!EndOfInput(inBuffer.get!int());
 }
 
 unittest
 {
     ubyte[] inBuffer = [0, 0, 0, 5, 'h', 'e', 'l', 'l', 'o', 0, 0, 0];
-    auto deserializer = makeDeserializer(inBuffer);
 
-    assert(deserializer.get!string() == "hello");
-    assertThrown!EndOfInput(deserializer.get!int());
+    assert(inBuffer.get!string() == "hello");
+    assertThrown!EndOfInput(inBuffer.get!int());
 }
 
 unittest
 {
     ubyte[] inBuffer = [0, 0, 0, 1, 0, 0, 0, 2];
-    auto deserializer = makeDeserializer(inBuffer);
 
-    assert(deserializer.get!(int[2])() == [1, 2]);
-    assertThrown!EndOfInput(deserializer.get!int());
+    assert(inBuffer.get!(int[2])() == [1, 2]);
+    assertThrown!EndOfInput(inBuffer.get!int());
+}
+
+unittest
+{
+    ubyte[] inBuffer = [0, 0, 0, 2, 0, 0, 0, 1, 0, 0, 0, 2];
+
+    assert(inBuffer.get!(int[])() == [1, 2]);
+    assertThrown!EndOfInput(inBuffer.get!int());
 }
 
 unittest
 {
     ubyte[] inBuffer = [1, 2, 0, 0];
-    auto deserializer = makeDeserializer(inBuffer);
 
-    assert(deserializer.get!(ubyte[2])() == [1, 2]);
-    assertThrown!EndOfInput(deserializer.get!int());
+    assert(inBuffer.get!(ubyte[2])() == [1, 2]);
+    assertThrown!EndOfInput(inBuffer.get!int());
+}
+
+unittest
+{
+    ubyte[] inBuffer = [1, 2, 3, 4];
+
+    assert(inBuffer.get!(ubyte[4])() == [1, 2, 3, 4]);
+    assertThrown!EndOfInput(inBuffer.get!int());
 }
 
 unittest
 {
     ubyte[] inBuffer = [0, 0, 0, 1, 0, 0, 0, 2];
-    auto deserializer = makeDeserializer(inBuffer);
 
     struct AB
     {
@@ -546,6 +528,6 @@ unittest
     }
 
     AB ab = {1, 2};
-    assert(deserializer.get!AB() == ab);
-    assertThrown!EndOfInput(deserializer.get!int());
+    assert(inBuffer.get!AB() == ab);
+    assertThrown!EndOfInput(inBuffer.get!int());
 }

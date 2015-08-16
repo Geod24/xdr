@@ -29,122 +29,115 @@ version (unittest)
     import std.exception : assertThrown;
 }
 
-class Serializer(Output) if (isOutputRange!(Output, ubyte))
+void put(T, Output)(ref Output output, T val)
+    if (isOutputRange!(Output, ubyte)
+        && T.sizeof % 4 == 0 && (isIntegral!T || isFloatingPoint!T))
 {
-    private:
-    Output output;
+    std.range.put(output, nativeToBigEndian(val)[]);
+}
 
-    public:
-    this(Output o)
+void put(T: bool, Output)(ref Output output, bool val)
+    if (isOutputRange!(Output, ubyte))
+{
+    if (val)
     {
-        output = o;
+        output.put!int(1);
     }
-
-    void put(T)(T val)
-        if (T.sizeof % 4 == 0 && (isIntegral!T || isFloatingPoint!T))
+    else
     {
-        std.range.put(output, nativeToBigEndian(val)[]);
+        output.put!int(0);
     }
+}
+// The existence of this method seems to solve const/overload problems
+void put(Output)(ref Output output, bool val) if (isOutputRange!(Output, ubyte))
+{
+    output.put!bool(val);
+}
 
-    void put(T: bool)(bool val)
+void put(ulong len, Output)(ref Output output, in ubyte[len] data)
+    if (isOutputRange!(Output, ubyte) && len % 4 == 0)
+{
+    std.range.put(output, data[]);
+}
+
+void put(ulong len, Output)(ref Output output, in ubyte[len] data)
+    if (isOutputRange!(Output, ubyte) && len % 4 != 0)
+{
+    std.range.put(output, data[]);
+    enum padding = 4 - (len % 4);
+    std.range.put(output, [0, 0, 0][0 .. padding]);
+}
+
+void put(Array, Output)(ref Output output, in Array data)
+    if (isOutputRange!(Output, ubyte) && isStaticArray!Array)
+{
+    foreach (const ref elem; data)
     {
-        if (val)
-        {
-            this.put!int(1);
-        }
-        else
-        {
-            this.put!int(0);
-        }
-    }
-    // The existence of this method seems to solve const/overload problems
-    void put(bool val)
-    {
-        put!bool(val);
-    }
-
-    void put(ulong len)(in ubyte[len] data) if (len % 4 == 0)
-    {
-        std.range.put(output, data[]);
-    }
-
-    void put(ulong len)(in ubyte[len] data) if (len % 4 != 0)
-    {
-        std.range.put(output, data[]);
-        enum padding = 4 - (len % 4);
-        std.range.put(output, [0, 0, 0][0 .. padding]);
-    }
-
-    void put(Array)(in Array data) if (isStaticArray!Array)
-    {
-        foreach (const ref elem; data)
-        {
-            this.put(elem);
-        }
-    }
-
-    void put(Array)(in Array data)
-        if (isDynamicArray!Array && !is(Array == ubyte[]) && !is(Array == string))
-    in {
-        assert(data.length <= uint.max);
-    }
-    body {
-        this.put!uint(cast(uint)data.length);
-        foreach (const ref elem; data)
-        {
-            this.put(elem);
-        }
-    }
-
-    void put(T: ubyte[])(in T data)
-    in {
-        assert(data.length <= uint.max);
-    }
-    body {
-        this.put!uint(cast(uint)data.length);
-        std.range.put(output, data);
-        if (data.length % 4 > 0)
-        {
-            immutable pad_length = 4 - (data.length % 4);
-            ubyte[] padding = [0, 0, 0];
-            std.range.put(output, padding[0 .. pad_length]);
-        }
-    }
-
-    // FIXME combine with ubyte[]
-    void put(T: string)(in T data)
-    in {
-        assert(data.length <= uint.max);
-    }
-    body {
-        this.put!uint(cast(uint)data.length);
-        std.range.put(output, data);
-        if (data.length % 4 > 0)
-        {
-            immutable pad_length = 4 - (data.length % 4);
-            ubyte[] padding = [0, 0, 0];
-            std.range.put(output, padding[0 .. pad_length]);
-        }
-    }
-
-    void put(T)(in T data)
-        if (isAggregateType!T && !hasIndirections!T)
-    {
-        foreach (elem; data.tupleof)
-        {
-            put(elem);
-        }
+        output.put(elem);
     }
 }
 
-Serializer!O makeSerializer(O)(O o)
+void put(Array, Output)(ref Output output, in Array data)
+    if (isOutputRange!(Output, ubyte)
+        && isDynamicArray!Array && !is(Array == ubyte[]) && !is(Array == string)
+        && __traits(compiles, output.put!(ElementType!Array)(data[0])))
+in {
+    assert(data.length <= uint.max);
+}
+body {
+    output.put!uint(cast(uint)data.length);
+    foreach (const ref elem; data)
+    {
+        output.put(elem);
+    }
+}
+
+void put(T: ubyte[], Output)(ref Output output, in T data)
+    if (isOutputRange!(Output, ubyte))
+in {
+    assert(data.length <= uint.max);
+}
+body {
+    output.put!uint(cast(uint)data.length);
+    std.range.put(output, data);
+    if (data.length % 4 > 0)
+    {
+        immutable pad_length = 4 - (data.length % 4);
+        ubyte[] padding = [0, 0, 0];
+        std.range.put(output, padding[0 .. pad_length]);
+    }
+}
+
+// FIXME combine with ubyte[]
+void put(T: string, Output)(ref Output output, in T data)
+    if (isOutputRange!(Output, ubyte))
+in {
+    assert(data.length <= uint.max);
+}
+body {
+    output.put!uint(cast(uint)data.length);
+    std.range.put(output, data);
+    if (data.length % 4 > 0)
+    {
+        immutable pad_length = 4 - (data.length % 4);
+        ubyte[] padding = [0, 0, 0];
+        std.range.put(output, padding[0 .. pad_length]);
+    }
+}
+
+void put(T, Output)(ref Output output, in T data)
+    if (isOutputRange!(Output, ubyte)
+        && isAggregateType!T && !hasIndirections!T)
 {
-    return new Serializer!O(o);
+    foreach (elem; data.tupleof)
+    {
+        output.put(elem);
+    }
 }
 
 unittest
 {
-    Serializer!(ubyte[]) serializer;
+    ubyte[] serializer;
 
     assert(__traits(compiles, serializer.put!char(2)) == false);
     assert(__traits(compiles, serializer.put!dchar(2)) == false);
@@ -200,73 +193,73 @@ unittest
 unittest
 {
     ubyte[] outBuffer = new ubyte[4];
-    auto serializer = makeSerializer(outBuffer);
+    ubyte[] movingBuffer = outBuffer[];
 
-    serializer.put!int(4);
+    movingBuffer.put!int(4);
     assert(outBuffer == [0, 0, 0, 4]);
 }
 
 unittest
 {
     ubyte[] outBuffer = new ubyte[4];
-    auto serializer = makeSerializer(outBuffer);
+    ubyte[] movingBuffer = outBuffer[];
 
-    serializer.put!bool(true);
+    movingBuffer.put!bool(true);
     assert(outBuffer == [0, 0, 0, 1]);
 }
 
 unittest
 {
     ubyte[] outBuffer = new ubyte[8];
-    auto serializer = makeSerializer(outBuffer);
+    ubyte[] movingBuffer = outBuffer[];
 
-    serializer.put!long(4);
+    movingBuffer.put!long(4);
     assert(outBuffer == [0, 0, 0, 0, 0, 0, 0, 4]);
 }
 
 unittest
 {
     ubyte[] outBuffer = new ubyte[8];
-    auto serializer = makeSerializer(outBuffer);
+    ubyte[] movingBuffer = outBuffer[];
 
     ubyte[] data = [1, 2, 3, 4];
-    serializer.put(data);
+    movingBuffer.put(data);
     assert(outBuffer == [0, 0, 0, 4, 1, 2, 3, 4]);
 }
 unittest
 {
     ubyte[] outBuffer = new ubyte[8];
-    auto serializer = makeSerializer(outBuffer);
+    ubyte[] movingBuffer = outBuffer[];
 
     ubyte[] data = [1, 2, 3];
-    serializer.put(data);
+    movingBuffer.put(data);
     assert(outBuffer == [0, 0, 0, 3, 1, 2, 3, 0]);
 }
 
 unittest
 {
     ubyte[] outBuffer = new ubyte[12];
-    auto serializer = makeSerializer(outBuffer);
+    ubyte[] movingBuffer = outBuffer[];
 
     string data = "hello";
-    serializer.put(data);
+    movingBuffer.put(data);
     assert(outBuffer == [0, 0, 0, 5, 'h', 'e', 'l', 'l', 'o', 0, 0, 0]);
 }
 
 unittest
 {
     ubyte[] outBuffer = new ubyte[8];
-    auto serializer = makeSerializer(outBuffer);
+    ubyte[] movingBuffer = outBuffer[];
 
     int[2] data = [1, 2];
-    serializer.put(data);
+    movingBuffer.put(data);
     assert(outBuffer == [0, 0, 0, 1, 0, 0, 0, 2]);
 }
 
 unittest
 {
     ubyte[] outBuffer = new ubyte[8];
-    auto serializer = makeSerializer(outBuffer);
+    ubyte[] movingBuffer = outBuffer[];
 
     struct AB
     {
@@ -275,7 +268,7 @@ unittest
     }
 
     AB ab = {1, 2};
-    serializer.put(ab);
+    movingBuffer.put(ab);
     assert(outBuffer == [0, 0, 0, 1, 0, 0, 0, 2]);
 }
 

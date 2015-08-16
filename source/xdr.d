@@ -29,14 +29,15 @@ version (unittest)
     import std.exception : assertThrown;
 }
 
-void put(T, Output)(ref Output output, T val)
+ref Output put(T, Output)(ref Output output, T val)
     if (isOutputRange!(Output, ubyte)
         && T.sizeof % 4 == 0 && (isIntegral!T || isFloatingPoint!T))
 {
     std.range.put(output, nativeToBigEndian(val)[]);
+    return output;
 }
 
-void put(T: bool, Output)(ref Output output, bool val)
+ref Output put(T: bool, Output)(ref Output output, bool val)
     if (isOutputRange!(Output, ubyte))
 {
     if (val)
@@ -47,37 +48,42 @@ void put(T: bool, Output)(ref Output output, bool val)
     {
         output.put!int(0);
     }
+
+    return output;
 }
 // The existence of this method seems to solve const/overload problems
-void put(Output)(ref Output output, bool val) if (isOutputRange!(Output, ubyte))
+ref Output put(Output)(ref Output output, bool val) if (isOutputRange!(Output, ubyte))
 {
-    output.put!bool(val);
+    return output.put!bool(val);
 }
 
-void put(ulong len, Output)(ref Output output, in ubyte[len] data)
+ref Output put(ulong len, Output)(ref Output output, in ubyte[len] data)
     if (isOutputRange!(Output, ubyte) && len % 4 == 0)
 {
     std.range.put(output, data[]);
+    return output;
 }
 
-void put(ulong len, Output)(ref Output output, in ubyte[len] data)
+ref Output put(ulong len, Output)(ref Output output, in ubyte[len] data)
     if (isOutputRange!(Output, ubyte) && len % 4 != 0)
 {
     std.range.put(output, data[]);
     enum padding = 4 - (len % 4);
     std.range.put(output, [0, 0, 0][0 .. padding]);
+    return output;
 }
 
-void put(Array, Output)(ref Output output, in Array data)
+ref Output put(Array, Output)(ref Output output, in Array data)
     if (isOutputRange!(Output, ubyte) && isStaticArray!Array)
 {
     foreach (const ref elem; data)
     {
         output.put(elem);
     }
+    return output;
 }
 
-void put(Array, Output)(ref Output output, in Array data)
+ref Output put(Array, Output)(ref Output output, in Array data)
     if (isOutputRange!(Output, ubyte)
         && isDynamicArray!Array && !is(Array == ubyte[]) && !is(Array == string)
         && __traits(compiles, output.put!(ElementType!Array)(data[0])))
@@ -90,9 +96,11 @@ body {
     {
         output.put(elem);
     }
+
+    return output;
 }
 
-void put(T: ubyte[], Output)(ref Output output, in T data)
+ref Output put(T: ubyte[], Output)(ref Output output, in T data)
     if (isOutputRange!(Output, ubyte))
 in {
     assert(data.length <= uint.max);
@@ -106,10 +114,12 @@ body {
         ubyte[] padding = [0, 0, 0];
         std.range.put(output, padding[0 .. pad_length]);
     }
+
+    return output;
 }
 
 // FIXME combine with ubyte[]
-void put(T: string, Output)(ref Output output, in T data)
+ref Output put(T: string, Output)(ref Output output, in T data)
     if (isOutputRange!(Output, ubyte))
 in {
     assert(data.length <= uint.max);
@@ -123,9 +133,10 @@ body {
         ubyte[] padding = [0, 0, 0];
         std.range.put(output, padding[0 .. pad_length]);
     }
+    return output;
 }
 
-void put(T, Output)(ref Output output, in T data)
+ref Output put(T, Output)(ref Output output, in T data)
     if (isOutputRange!(Output, ubyte)
         && isAggregateType!T && !hasIndirections!T)
 {
@@ -133,6 +144,7 @@ void put(T, Output)(ref Output output, in T data)
     {
         output.put(elem);
     }
+    return output;
 }
 
 unittest
@@ -270,6 +282,15 @@ unittest
     AB ab = {1, 2};
     movingBuffer.put(ab);
     assert(outBuffer == [0, 0, 0, 1, 0, 0, 0, 2]);
+}
+
+unittest
+{
+    ubyte[] outBuffer = new ubyte[8];
+    ubyte[] movingBuffer = outBuffer[];
+
+    movingBuffer.put!int(4).put!int(5);
+    assert(outBuffer == [0, 0, 0, 4, 0, 0, 0, 5]);
 }
 
 class EndOfInput : Exception
